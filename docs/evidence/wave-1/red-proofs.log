@@ -1,0 +1,202 @@
+# Wave 1 QA Red-Proof Evidence — `docs/evidence/wave-1/red-proofs.log`
+- Stage: wave-1 (`wave-1-prefix-roles`)
+- Worktree: `/home/john/Projects/Heretek-AI-Rebuild/heretek-context-router/worktrees/wave-1`
+- Branch: `wave-1-prefix-roles`
+- HEAD: `0a4362a feat(wave-1): 4-layer prefix assembler, 6 roles, typed handoffs`
+- Date (UTC): 2026-10-15T21:52:34Z
+- QA agent: agency-qa (subagent verifier)
+- Bun: v1.4.2 (744846f84)
+- Spec: `docs/prompts/SPEC.md` §2.1; checklist `docs/prompts/verify-stage.md` §1 (1a–1d)
+
+## 1a. `make check` — MUST exit 0 — OBSERVED exit 0
+Command: `make check` (runs `bun install` + `bun run check` + `bun test`, fail-closed)
+Full output:
+```text
+bun install
+bun install v1.4.2 (744846f84)
+
+Checked 7 installs across 8 packages (no changes) [1.00ms]
+bun run check
+$ tsc --noEmit
+bun test
+bun test v1.4.2 (744846f84)
+
+ 31 pass
+ 0 fail
+ 630 expect() calls
+Ran 31 tests across 2 files. [30.00ms]
+EXIT_CODE=0
+```
+Result: PASS (exit 0).
+
+## 1b. Accept script — MUST exit 0 — OBSERVED exit 0
+Command: `bash scripts/accept/wave-1.sh` (prior waves: none — wave-1 is first)
+Full output:
+```text
+=== wave-1 accept: typecheck ===
+$ tsc --noEmit
+=== wave-1 accept: test suite ===
+bun test v1.4.2 (744846f84)
+
+ 31 pass
+ 0 fail
+ 630 expect() calls
+Ran 31 tests across 2 files. [35.00ms]
+=== wave-1 accept: prefix equality spot check (director vs qa-adversary) ===
+PASS: frozen prefix identical for director and qa-adversary (8268 bytes, breakpoints [1089,8268])
+=== wave-1 accept: ALL CHECKS PASSED ===
+EXIT_CODE=0
+```
+Result: PASS (exit 0).
+Note: frozen prefix size 8268 bytes here vs 8101 bytes quoted in `docs/reports/wave-1.md` §Test Results. Both runs assert identical bytes across roles; size delta is role-file content, not a contract break. The invariant (all 6 roles share byte-for-byte prefix 0..B2) holds in both runs (31/31 pass + spot check PASS).
+
+## 1c. Red-Proof Sabotage (MANDATORY) — break core invariant, confirm FAIL, restore, confirm green
+
+### 1c-i. Condition asserted
+`assemblePrefixCachedPrompt` Layer 1 (bytes 0..B1) MUST be the static `BASE_ENGINE_INVARIANT` with NO role name, NO timestamp, NO UUID at byte 0. For ANY two roles roleA/roleB: `promptA.systemPrompt.slice(0, promptA.frozenPrefixBytes) === promptB.systemPrompt.slice(0, promptB.frozenPrefixBytes)`. Enforced by `test/prefix-cache.test.ts` (13 tests: all 15 role-pair equalities, B1 slicing, B1..B2 verbatim shared-context, ASCII purity, volatility absence).
+
+### 1c-ii. Targeted minimal sabotage
+File: `src/prefix-builder/assemble-prompt.ts` (line 182 in HEAD `0a4362a`)
+HEAD (clean):
+```ts
+  const systemPrompt = layer1 + layer2 + layer3;
+```
+Sabotaged (via native edit, single-line replacement):
+```ts
+  const systemPrompt = `[SABOTAGE:${options.role}:${Date.now()}]` + layer1 + layer2 + layer3;
+```
+Effect: prepends role id + timestamp at byte 0 of Layer 1, breaking KV-cache invariance by construction (role-dependent + time-volatile prefix).
+
+### 1c-iii. Sabotage run — MUST exit >=1 — OBSERVED exit 1 (FAIL as required)
+Command: `bun test test/prefix-cache.test.ts`
+Full failure output (excerpt, exit code trailer included):
+```text
+bun test v1.4.2 (744846f84)
+
+test/prefix-cache.test.ts:
+100 |         const promptB = built.get(roleB)!;
+101 |         expect(promptA.frozenPrefixBytes).toBe(promptB.frozenPrefixBytes);
+102 |         expect(promptA.cacheBreakpoints).toEqual(promptB.cacheBreakpoints);
+103 |         const frozenA = promptA.systemPrompt.slice(0, promptA.frozenPrefixBytes);
+104 |         const frozenB = promptB.systemPrompt.slice(0, promptB.frozenPrefixBytes);
+105 |         expect(frozenA).toBe(frozenB);
+                              ^
+error: expect(received).toBe(expected)
+
+@@ -1,2 +1,2 @@
+- "[SABOTAGE:architect:1792101132784]# Heretek Context Router -- Base Engine Invariant (Layer 1)
++ "[SABOTAGE:director:1792101132784]# Heretek Context Router -- Base Engine Invariant (Layer 1)
+
+@@ -148,2 +148,2 @@
+    the core invariant on purpose, observe the suite fail, restore cleanly,
+-   and re-observe green. Evidence is reco"
++   and re-observe green. Evidence is recor"
+
+- Expected  - 2
++ Received  + 2
+
+      at <anonymous> (/home/john/Projects/Heretek-AI-Rebuild/heretek-context-router/worktrees/wave-1/test/prefix-cache.test.ts:105:25)
+(fail) frozen prefix equality (byte 0 to B2 across all 6 roles) > every role pair shares a byte-for-byte identical frozen prefix [0.65ms]
+117 |         l1: p.systemPrompt.slice(0, p.cacheBreakpoints[0]),
+118 |         b1Bytes: Buffer.byteLength(p.systemPrompt.slice(0, p.cacheBreakpoints[0]), "utf8"),
+119 |       };
+120 |     });
+121 |     for (const entry of layers) {
+122 |       expect(entry.l1).toBe(layers[0]!.l1);
+                             ^
+error: expect(received).toBe(expected)
+
+@@ -1,2 +1,2 @@
+- "[SABOTAGE:director:1792101132785]# Heretek Context Router -- Base Engine Invariant (Layer 1)
++ "[SABOTAGE:architect:1792101132785]# Heretek Context Router -- Base Engine Invariant (Layer 1)
+
+@@ -19,2 +19,2 @@
+
+- End of Layer 1. Layer 2 (shared architectur"
++ End of Layer 1. Layer 2 (shared architectu"
+
+- Expected  - 2
++ Received  + 2
+
+      at <anonymous> (/home/john/Projects/Heretek-AI-Rebuild/heretek-context-router/worktrees/wave-1/test/prefix-cache.test.ts:122:24)
+(fail) frozen prefix equality (byte 0 to B2 across all 6 roles) > breakpoint B1 slices the static Layer 1 identically for all roles [0.48ms]
+128 |     const shared = await Bun.file(join(WORKSPACE_ROOT, "roles", "00-shared-context.md")).text();
+129 |     for (const role of ALL_ROLES) {
+130 |       const p = assemble(role as RoleId);
+131 |       const [b1, b2] = p.cacheBreakpoints;
+132 |       const asBytes = Buffer.from(p.systemPrompt, "utf8");
+133 |       expect(asBytes.subarray(b1, b2).toString("utf8")).toBe(shared);
+                                                              ^
+error: expect(received).toBe(expected)
+
+@@ -1,2 +1,3 @@
+- "# 00 -- Shared Architectural Invariants (Frozen Canonical Prefix, Layer 2)
++ "al invariants) follows verbatim.
++ # 00 -- Shared Architectural Invariants (Frozen Canonical Prefix, Layer 2)
+
+@@ -128,3 +129,2 @@
+    the core invariant on purpose, observe the suite fail, restore cleanly,
+-   and re-observe green. Evidence is recorded, never asserted from memory.
+- "
++   and re-observe green. Evidence is recor"
+
+- Expected  - 3
++ Received  + 3
+
+      at <anonymous> (/home/john/Projects/Heretek-AI-Rebuild/heretek-context-router/worktrees/wave-1/test/prefix-cache.test.ts:133:57)
+(fail) frozen prefix equality (byte 0 to B2 across all 6 roles) > bytes B1..B2 equal the shared-context file verbatim for every role [0.95ms]
+
+ 10 pass
+ 3 fail
+ 135 expect() calls
+Ran 13 tests across 1 file. [18.00ms]
+EXIT_CODE=1
+```
+Result: RED PROOF HOLDS — check is non-vacuous (fails immediately on invariant break; 3/13 fail, exit 1). No vacuous pass.
+
+### 1c-iv. Clean restore
+Command: `git checkout -- src/prefix-builder/assemble-prompt.ts`
+Observed:
+```text
+RESTORE_EXIT=0
+```
+Follow-up verification:
+```text
+$ git status --short
+(empty — clean)
+STATUS_EXIT=0
+$ git diff -- src/prefix-builder/assemble-prompt.ts
+(empty — no diff)
+DIFF_EXIT=0
+```
+Result: sabotage fully reverted; no production-code residue.
+
+### 1c-v. Post-restore green run — MUST exit 0 — OBSERVED exit 0
+Commands:
+- `bun test` → 31 pass / 0 fail / 630 expect() calls, Ran 31 tests across 2 files, EXIT_CODE=0
+- `bun run check` (`tsc --noEmit`, no diagnostics) → CHECK_EXIT=0
+- `bun test test/prefix-cache.test.ts` → 13 pass / 0 fail / 204 expect() calls, PREFIX_EXIT=0
+Result: PASS — tree green after restore.
+
+## 1c-vi. Zero-stubs check (verify-stage §2a / AGENTS.md §5)
+Command: `grep -rEn "TODO|FIXME|XXX|HACK|implement later|not implemented|echo \"passed\"|\\|\\| true|set \\+e" src roles test scripts`
+Observed: no matches, GREP_EXIT=1 (grep exit 1 = zero matches = required PASS).
+Note: `configs/` does not exist in Wave 1 (Wave 3 deliverable per SPEC §2.3); scan with `configs` returns exit 2 (missing dir), so canonical wave-1 scan omits it. No WebUI/worktree-manager/Docker artifacts.
+Supplemental:
+- `grep -rEn "return true;" src test` → no matches, RT_EXIT=1 (PASS — no dummy passes)
+- `grep -rEn "catch.*\\{\\s*\\}" src test` → no matches, CATCH_EXIT=1 (PASS — no empty catches)
+- Manual: all tests assert observable behavior (630 assertions / 31 tests); no assertion-free or constant-asserting tests.
+
+## 1d. Handoff gate state
+- `git status --short` after restore and before evidence commit: clean (only this new file `docs/evidence/wave-1/red-proofs.log` untracked/modified).
+- `git diff --stat`: empty for tracked files (no production-code modifications retained).
+- Evidence file: this file (`docs/evidence/wave-1/red-proofs.log`).
+- Post-restore `bun test` + `bun run check`: both green (see 1c-v).
+
+## QA VERDICT
+- 1a `make check`: PASS (exit 0)
+- 1b `bash scripts/accept/wave-1.sh`: PASS (exit 0)
+- 1c red-proof sabotage: PASS (sabotage → exit 1 with 3 failures; restore via `git checkout --` → green 31/31 + `tsc` clean)
+- 1d evidence: this transcript
+- Zero-stubs: PASS (zero matches)
+- No legitimate (non-sabotage) failures observed. QA Gate: PASS. Ready for Drift Guard (§2) + Coordinator merge gate (§3).
