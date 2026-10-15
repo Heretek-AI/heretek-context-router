@@ -1,0 +1,7 @@
+node_modules/
+dist/
+coverage/
+.bun-cache/
+worktrees/
+*.log
+.DS_Store

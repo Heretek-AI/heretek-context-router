@@ -1,0 +1,19 @@
+{
+  "name": "@heretek-ai/heretek-context-router",
+  "version": "0.1.0",
+  "description": "Lazy meta-tool routing (<500 tokens) and 4-layer invariant prompt prefix routing for OpenCode v2 multi-agent orchestration",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "bun test",
+    "check": "tsc --noEmit",
+    "accept": "bash scripts/accept/wave-*.sh"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.5.4"
+  }
+}
