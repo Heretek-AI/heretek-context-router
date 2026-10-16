@@ -1,28 +1,24 @@
 {
-  "$schema": "https://opencode.ai/schema/base-config.json",
-  "description": "heretek-context-router production base config (Wave 3): loads ONLY the lazy meta-tool broker plus context-mode so the upfront MCP schema footprint stays under 500 tokens. All domain backends (n2-qln, ghidra-mcp, adb-maestro, godot, research) stay behind the lazy broker and the :3000 agentgateway.",
+  "$schema": "https://opencode.ai/config.json",
   "plugins": ["@heretek-ai/opencode-harness"],
   "mcp": {
-    "heretek-lazy-broker": {
-      "type": "local",
-      "command": ["bun", "src/lazy-broker/meta-router-mcp.ts"],
-      "enabled": true,
-      "description": "Lazy meta-tool router exposing ONLY mcp_search_tools, mcp_inspect_schema, mcp_call_tool (<400 tokens)"
-    },
-    "context-mode": {
-      "type": "local",
-      "command": ["bun", "src/prefix-builder/assemble-prompt.ts"],
-      "enabled": true,
-      "description": "4-layer invariant prompt prefix assembler (KV-cache stable frozen prefix)"
+    "servers": {
+      "heretek-lazy-broker": {
+        "type": "local",
+        "command": ["heretek-lazy-broker"],
+        "environment": {
+          "HERETEK_GATEWAY_URL": "http://127.0.0.1:3000",
+          "HERETEK_GATEWAY_MODE": "per-target"
+        }
+      }
     }
   },
   "lazyBackends": {
-    "note": "These backends are NOT loaded into context. They are discovered lazily via mcp_search_tools and routed via mcp_call_tool through the agentgateway on :3000.",
-    "servers": ["n2-qln", "ghidra-mcp", "radare2-mcp", "morluto/rea", "iksnerd/adb-mcp", "maestro", "godot-mcp", "blender-mcp", "crawl4ai", "searxng", "computer-use-linux"],
+    "note": "Not read by OpenCode (unknown top-level keys are ignored). Documents what the broker routes: backend tools are discovered lazily via mcp_search_tools and called via mcp_call_tool through agentgateway. The deployed gateway config is heretek-devcontainers compose/agentgateway.yaml.",
     "gateway": "http://127.0.0.1:3000",
-    "harness": "@heretek-ai/opencode-harness"
+    "routes": "/mcp/<target>",
+    "targets": ["core", "ghidra", "radare2", "rea", "mdb", "adb", "maestro", "godot", "blender", "crawl4ai", "searxng", "gui"]
   },
-  "toolboxProfiles": ["core", "appsec", "android", "game", "research"],
   "tokenBudget": {
     "maxUpfrontSchemaTokens": 500,
     "targetUpfrontSchemaTokens": 400

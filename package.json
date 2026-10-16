@@ -4,10 +4,13 @@
   "description": "Lazy meta-tool routing (<500 tokens) and 4-layer invariant prompt prefix routing for OpenCode v2 multi-agent orchestration",
   "type": "module",
   "private": true,
+  "bin": {
+    "heretek-lazy-broker": "src/lazy-broker/meta-router-mcp.ts"
+  },
   "scripts": {
     "test": "bun test",
     "check": "tsc --noEmit",
-    "accept": "bash scripts/accept/wave-*.sh"
+    "accept": "bash scripts/accept/run-all.sh"
   },
   "dependencies": {
     "zod": "^3.23.8"
