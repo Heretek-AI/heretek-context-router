@@ -15,6 +15,8 @@
  *   (exact or substring, either direction, case-insensitive).
  */
 
+import { remoteToolName } from "./backends.ts";
+
 export type BrokerProfile = "core" | "appsec" | "android" | "game" | "research";
 
 export const ALL_BROKER_PROFILES: readonly BrokerProfile[] = [
@@ -44,6 +46,10 @@ export interface BackendToolDef {
   inputSchemaJson: string;
   /** True when invoking the tool mutates external state (used by the auth gate). */
   mutating: boolean;
+  /** Tool name as the backend itself exposes it (catalog name minus `<target>_`). */
+  remoteName: string;
+  /** "seed" = offline static entry, "discovered" = from the backend's tools/list. */
+  source: "seed" | "discovered";
 }
 
 export interface CatalogSearchOptions {
@@ -116,11 +122,21 @@ function def(
   if (description.length === 0) {
     throw new Error(`Backend tool "${name}" must carry a one-line description. Failing closed.`);
   }
-  return { server, profile, name, description, boostKeywords, inputSchemaJson, mutating };
+  return {
+    server,
+    profile,
+    name,
+    description,
+    boostKeywords,
+    inputSchemaJson,
+    mutating,
+    remoteName: remoteToolName(server, name),
+    source: "seed",
+  };
 }
 
 /**
- * Seed definitions: 34 domain tools across the 5 Heretek Compose profiles,
+ * Offline seed definitions: 34 domain tools across the 5 Heretek Compose profiles,
  * covering ghidra-mcp, radare2-mcp, morluto/rea, iksnerd/adb-mcp, maestro,
  * godot-mcp, blender-mcp, crawl4ai, searxng, and computer-use-linux.
  */
@@ -128,14 +144,14 @@ export function buildSeedToolDefinitions(): BackendToolDef[] {
   return [
     // ---- core (6, server heretek-core) ----
     def(
-      "heretek-core", "core", "core__fs_read",
+      "heretek-core", "core", "core_fs_read",
       "Read a workspace-relative file and return its text contents.",
       ["file", "read", "filesystem", "cat"],
       buildSchema({ path: { type: "string", description: "Workspace-relative file path." } }, ["path"]),
       false,
     ),
     def(
-      "heretek-core", "core", "core__fs_write",
+      "heretek-core", "core", "core_fs_write",
       "Write text contents to a workspace-relative file path.",
       ["file", "write", "filesystem", "save"],
       buildSchema(
@@ -148,28 +164,28 @@ export function buildSeedToolDefinitions(): BackendToolDef[] {
       true,
     ),
     def(
-      "heretek-core", "core", "core__shell_exec",
+      "heretek-core", "core", "core_shell_exec",
       "Execute a shell command in the workspace and capture output.",
       ["shell", "exec", "bash", "command"],
       buildSchema({ command: { type: "string", description: "Shell command to run." } }, ["command"]),
       true,
     ),
     def(
-      "heretek-core", "core", "core__git_status",
+      "heretek-core", "core", "core_git_status",
       "Report git working-tree status and current branch.",
       ["git", "status", "branch", "vcs"],
       buildSchema({}, []),
       false,
     ),
     def(
-      "heretek-core", "core", "core__process_list",
+      "heretek-core", "core", "core_process_list",
       "List running OS processes with pid and command line.",
       ["process", "ps", "tasks", "inspect"],
       buildSchema({}, []),
       false,
     ),
     def(
-      "heretek-core", "core", "core__env_inspect",
+      "heretek-core", "core", "core_env_inspect",
       "Inspect allow-listed environment variables for debugging.",
       ["env", "environment", "config", "inspect"],
       buildSchema(
@@ -180,21 +196,21 @@ export function buildSeedToolDefinitions(): BackendToolDef[] {
     ),
     // ---- appsec (8) ----
     def(
-      "ghidra-mcp", "appsec", "ghidra__analyze_binary",
+      "ghidra-mcp", "appsec", "ghidra_analyze_binary",
       "Analyze a binary with Ghidra headless and list discovered functions.",
       ["ghidra", "binary", "analyze", "reverse", "firmware"],
       buildSchema({ path: { type: "string", description: "Binary file path." } }, ["path"]),
       false,
     ),
     def(
-      "ghidra-mcp", "appsec", "ghidra__list_functions",
+      "ghidra-mcp", "appsec", "ghidra_list_functions",
       "List functions discovered by Ghidra in the loaded program.",
       ["ghidra", "functions", "symbols", "reverse"],
       buildSchema({ program: { type: "string", description: "Loaded program name." } }, ["program"]),
       false,
     ),
     def(
-      "ghidra-mcp", "appsec", "ghidra__decompile_function",
+      "ghidra-mcp", "appsec", "ghidra_decompile_function",
       "Decompile a single Ghidra function to C-like pseudocode.",
       ["ghidra", "decompile", "function", "pseudocode", "reverse"],
       buildSchema(
@@ -207,7 +223,7 @@ export function buildSeedToolDefinitions(): BackendToolDef[] {
       false,
     ),
     def(
-      "radare2-mcp", "appsec", "radare2__disassemble",
+      "radare2-mcp", "appsec", "radare2_disassemble",
       "Disassemble bytes at an offset with radare2 and return mnemonics.",
       ["radare2", "r2", "disassemble", "asm", "reverse"],
       buildSchema(
@@ -220,28 +236,28 @@ export function buildSeedToolDefinitions(): BackendToolDef[] {
       false,
     ),
     def(
-      "radare2-mcp", "appsec", "radare2__strings",
+      "radare2-mcp", "appsec", "radare2_strings",
       "Extract printable strings from a binary via radare2.",
       ["radare2", "r2", "strings", "iocs", "triage"],
       buildSchema({ path: { type: "string", description: "Binary file path." } }, ["path"]),
       false,
     ),
     def(
-      "morluto/rea", "appsec", "rea__scan",
+      "morluto/rea", "appsec", "rea_scan",
       "Scan a binary with the REA engine for capabilities and behaviors.",
       ["rea", "scan", "capabilities", "malware", "triage"],
       buildSchema({ path: { type: "string", description: "Binary file path." } }, ["path"]),
       false,
     ),
     def(
-      "morluto/rea", "appsec", "rea__report",
+      "morluto/rea", "appsec", "rea_report",
       "Render a capability report for a previous REA scan id.",
       ["rea", "report", "capabilities", "malware"],
       buildSchema({ scanId: { type: "string", description: "Scan identifier." } }, ["scanId"]),
       false,
     ),
     def(
-      "ghidra-mcp", "appsec", "ghidra__xrefs_to",
+      "ghidra-mcp", "appsec", "ghidra_xrefs_to",
       "List cross-references to a symbol or address in Ghidra.",
       ["ghidra", "xrefs", "references", "reverse"],
       buildSchema(
@@ -255,14 +271,14 @@ export function buildSeedToolDefinitions(): BackendToolDef[] {
     ),
     // ---- android (7) ----
     def(
-      "iksnerd/adb-mcp", "android", "adb__devices",
+      "iksnerd/adb-mcp", "android", "adb_devices",
       "List connected Android devices via adb.",
       ["android", "adb", "devices", "emulator"],
       buildSchema({}, []),
       false,
     ),
     def(
-      "iksnerd/adb-mcp", "android", "adb__install",
+      "iksnerd/adb-mcp", "android", "adb_install",
       "Install an APK onto the selected Android device.",
       ["android", "adb", "install", "apk", "deploy"],
       buildSchema(
@@ -275,14 +291,14 @@ export function buildSeedToolDefinitions(): BackendToolDef[] {
       true,
     ),
     def(
-      "iksnerd/adb-mcp", "android", "adb__logcat",
+      "iksnerd/adb-mcp", "android", "adb_logcat",
       "Capture logcat output from an Android device with a filter.",
       ["android", "adb", "logcat", "logs", "debug"],
       buildSchema({ serial: { type: "string", description: "Device serial." } }, ["serial"]),
       false,
     ),
     def(
-      "iksnerd/adb-mcp", "android", "adb__shell",
+      "iksnerd/adb-mcp", "android", "adb_shell",
       "Run a shell command on the Android device via adb shell.",
       ["android", "adb", "shell", "device", "command"],
       buildSchema(
@@ -295,14 +311,14 @@ export function buildSeedToolDefinitions(): BackendToolDef[] {
       true,
     ),
     def(
-      "maestro", "android", "maestro__test",
+      "maestro", "android", "maestro_test",
       "Run a Maestro UI flow file against the connected device.",
       ["android", "maestro", "test", "ui", "flow", "e2e"],
       buildSchema({ flow: { type: "string", description: "Maestro flow YAML path." } }, ["flow"]),
       true,
     ),
     def(
-      "maestro", "android", "maestro__flow_run",
+      "maestro", "android", "maestro_flow_run",
       "Execute a named Maestro flow with tags on a device serial.",
       ["android", "maestro", "flow", "run", "e2e"],
       buildSchema(
@@ -315,7 +331,7 @@ export function buildSeedToolDefinitions(): BackendToolDef[] {
       true,
     ),
     def(
-      "iksnerd/adb-mcp", "android", "adb__screenshot",
+      "iksnerd/adb-mcp", "android", "adb_screenshot",
       "Capture a screenshot from the Android device.",
       ["android", "adb", "screenshot", "screen", "capture"],
       buildSchema({ serial: { type: "string", description: "Device serial." } }, ["serial"]),
@@ -323,28 +339,28 @@ export function buildSeedToolDefinitions(): BackendToolDef[] {
     ),
     // ---- game (7) ----
     def(
-      "godot-mcp", "game", "godot__scene_tree",
+      "godot-mcp", "game", "godot_scene_tree",
       "Dump the running Godot scene tree for inspection.",
       ["godot", "scene", "tree", "nodes", "debug"],
       buildSchema({ project: { type: "string", description: "Godot project path." } }, ["project"]),
       false,
     ),
     def(
-      "godot-mcp", "game", "godot__run_project",
+      "godot-mcp", "game", "godot_run_project",
       "Launch the Godot project headless and capture log output.",
       ["godot", "run", "launch", "playtest", "headless"],
       buildSchema({ project: { type: "string", description: "Godot project path." } }, ["project"]),
       true,
     ),
     def(
-      "godot-mcp", "game", "godot__script_lint",
+      "godot-mcp", "game", "godot_script_lint",
       "Lint GDScript files in a Godot project and report diagnostics.",
       ["godot", "gdscript", "lint", "script", "diagnostics"],
       buildSchema({ project: { type: "string", description: "Godot project path." } }, ["project"]),
       false,
     ),
     def(
-      "godot-mcp", "game", "godot__export_build",
+      "godot-mcp", "game", "godot_export_build",
       "Export a Godot build preset to a distributable package.",
       ["godot", "export", "build", "preset", "package"],
       buildSchema(
@@ -357,7 +373,7 @@ export function buildSeedToolDefinitions(): BackendToolDef[] {
       true,
     ),
     def(
-      "blender-mcp", "game", "blender__render",
+      "blender-mcp", "game", "blender_render",
       "Render a Blender scene frame to an image file.",
       ["blender", "render", "scene", "frame", "3d"],
       buildSchema(
@@ -370,14 +386,14 @@ export function buildSeedToolDefinitions(): BackendToolDef[] {
       true,
     ),
     def(
-      "blender-mcp", "game", "blender__import_mesh",
+      "blender-mcp", "game", "blender_import_mesh",
       "Import a mesh asset into the open Blender scene.",
       ["blender", "import", "mesh", "asset", "3d"],
       buildSchema({ asset: { type: "string", description: "Mesh asset path." } }, ["asset"]),
       true,
     ),
     def(
-      "blender-mcp", "game", "blender__export_fbx",
+      "blender-mcp", "game", "blender_export_fbx",
       "Export the active Blender selection to FBX.",
       ["blender", "export", "fbx", "mesh", "3d"],
       buildSchema({ out: { type: "string", description: "Output FBX path." } }, ["out"]),
@@ -385,42 +401,42 @@ export function buildSeedToolDefinitions(): BackendToolDef[] {
     ),
     // ---- research (6) ----
     def(
-      "crawl4ai", "research", "crawl4ai__crawl_page",
+      "crawl4ai", "research", "crawl4ai_crawl_page",
       "Crawl a URL and return cleaned page content.",
       ["crawl", "crawl4ai", "web", "scrape", "fetch"],
       buildSchema({ url: { type: "string", description: "Page URL." } }, ["url"]),
       true,
     ),
     def(
-      "crawl4ai", "research", "crawl4ai__extract_markdown",
+      "crawl4ai", "research", "crawl4ai_extract_markdown",
       "Extract a page as markdown for research notes.",
       ["crawl", "crawl4ai", "markdown", "extract", "notes"],
       buildSchema({ url: { type: "string", description: "Page URL." } }, ["url"]),
       false,
     ),
     def(
-      "searxng", "research", "searxng__web_search",
+      "searxng", "research", "searxng_web_search",
       "Search the web via SearXNG and return ranked results.",
       ["search", "searxng", "web", "query", "research"],
       buildSchema({ query: { type: "string", description: "Search query." } }, ["query"]),
       false,
     ),
     def(
-      "searxng", "research", "searxng__search_images",
+      "searxng", "research", "searxng_search_images",
       "Search images via SearXNG for reference material.",
       ["search", "searxng", "images", "reference", "media"],
       buildSchema({ query: { type: "string", description: "Search query." } }, ["query"]),
       false,
     ),
     def(
-      "computer-use-linux", "research", "gui__click",
+      "computer-use-linux", "research", "gui_click",
       "Click a desktop UI element by label or coordinates.",
       ["gui", "click", "desktop", "computer-use", "automation"],
       buildSchema({ target: { type: "string", description: "Element label or x,y." } }, ["target"]),
       true,
     ),
     def(
-      "computer-use-linux", "research", "gui__screenshot",
+      "computer-use-linux", "research", "gui_screenshot",
       "Capture the Linux desktop screenshot for grounding.",
       ["gui", "screenshot", "desktop", "computer-use", "grounding"],
       buildSchema({}, []),
@@ -461,6 +477,87 @@ export class ToolCatalog {
     }
     this.totalLength += terms.length;
     this.docs.set(definition.name, { def: definition, terms: counts, length: terms.length });
+  }
+
+  /** Removes one tool and its term statistics. Returns false when absent. */
+  removeTool(name: string): boolean {
+    const entry = this.docs.get(name);
+    if (entry === undefined) {
+      return false;
+    }
+    for (const term of entry.terms.keys()) {
+      const df = (this.docFreq.get(term) ?? 0) - 1;
+      if (df <= 0) {
+        this.docFreq.delete(term);
+      } else {
+        this.docFreq.set(term, df);
+      }
+    }
+    this.totalLength -= entry.length;
+    return this.docs.delete(name);
+  }
+
+  /** Inserts a tool, replacing any existing entry with the same name. */
+  upsertTool(definition: BackendToolDef): void {
+    if (this.docs.has(definition.name)) {
+      const previous = this.getTool(definition.name);
+      this.removeTool(definition.name);
+      try {
+        this.addTool(definition);
+      } catch (error) {
+        this.addTool(previous);
+        throw error;
+      }
+      return;
+    }
+    this.addTool(definition);
+  }
+
+  /** All tools currently indexed for one backend server, sorted by name. */
+  toolsForServer(server: string): BackendToolDef[] {
+    const out: BackendToolDef[] = [];
+    for (const entry of this.docs.values()) {
+      if (entry.def.server === server) {
+        out.push(entry.def);
+      }
+    }
+    return out.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  }
+
+  /**
+   * Atomically replaces every tool of `server` (seed or previously
+   * discovered) with `definitions`. Every definition must belong to
+   * `server`; on any invalid definition the catalog is left unchanged.
+   */
+  replaceServerTools(server: string, definitions: BackendToolDef[]): void {
+    const names = new Set<string>();
+    for (const definition of definitions) {
+      if (definition.server !== server) {
+        throw new Error(
+          `Tool "${definition.name}" belongs to "${definition.server}", not "${server}". Failing closed.`,
+        );
+      }
+      if (names.has(definition.name)) {
+        throw new Error(`Duplicate backend tool name "${definition.name}". Failing closed.`);
+      }
+      const owner = this.docs.get(definition.name)?.def.server;
+      if (owner !== undefined && owner !== server) {
+        throw new Error(
+          `Tool "${definition.name}" is already owned by backend "${owner}". Failing closed.`,
+        );
+      }
+      assertValidBrokerProfile(definition.profile);
+      if (tokenize(corpusText(definition)).length === 0) {
+        throw new Error(`Backend tool "${definition.name}" has empty indexable text. Failing closed.`);
+      }
+      names.add(definition.name);
+    }
+    for (const existing of this.toolsForServer(server)) {
+      this.removeTool(existing.name);
+    }
+    for (const definition of definitions) {
+      this.addTool(definition);
+    }
   }
 
   getTool(name: string): BackendToolDef {

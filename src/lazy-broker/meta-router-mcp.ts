@@ -1,3 +1,4 @@
+#!/usr/bin/env bun
 /**
  * meta-router-mcp.ts — Lazy meta-tool discovery broker.
  *
@@ -14,6 +15,12 @@
  *      (qa-adversary and director cannot call mutating tools) + routing to
  *      the target backend over a registered transport (fail-closed when the
  *      backend is unreachable).
+ *
+ * Run directly (`bun src/lazy-broker/meta-router-mcp.ts`, or the
+ * `heretek-lazy-broker` package bin) it serves MCP over stdio, wires every
+ * backend through agentgateway's Streamable HTTP endpoint
+ * (HERETEK_GATEWAY_URL, default http://127.0.0.1:3000) and replaces the
+ * offline seed catalog with each backend's live tools/list.
  */
 
 import {
@@ -25,6 +32,10 @@ import {
   type RankedTool,
   type ToolCatalog,
 } from "./bm25-catalog.ts";
+import { ROUTING_TABLE, catalogToolName, endpointFor, type BackendEndpoint } from "./backends.ts";
+import type { McpToolDescriptor } from "./http-transport.ts";
+
+export { ROUTING_TABLE, type BackendEndpoint };
 
 export const META_TOOL_NAMES = ["mcp_search_tools", "mcp_inspect_schema", "mcp_call_tool"] as const;
 
@@ -65,35 +76,13 @@ const READ_ONLY_ROLES: readonly BrokerRole[] = ["director", "qa-adversary"] as c
 export const CIRCUIT_FAILURE_THRESHOLD = 3;
 export const CIRCUIT_OPEN_MS = 60_000;
 
-export interface BackendEndpoint {
-  transport: "stdio";
-  command: string;
-}
-
-/**
- * Static routing table: backend MCP server -> launch endpoint.
- * A live call additionally requires a registered in-process transport
- * (registerBackendTransport); without one the router fails closed with
- * BackendUnreachableError instead of silently dropping the call.
- */
-export const ROUTING_TABLE: Record<string, BackendEndpoint> = {
-  "heretek-core": { transport: "stdio", command: "heretek-core-mcp" },
-  "ghidra-mcp": { transport: "stdio", command: "ghidra-mcp" },
-  "radare2-mcp": { transport: "stdio", command: "radare2-mcp" },
-  "morluto/rea": { transport: "stdio", command: "rea-mcp" },
-  "iksnerd/adb-mcp": { transport: "stdio", command: "adb-mcp" },
-  maestro: { transport: "stdio", command: "maestro-mcp" },
-  "godot-mcp": { transport: "stdio", command: "godot-mcp" },
-  "blender-mcp": { transport: "stdio", command: "blender-mcp" },
-  crawl4ai: { transport: "stdio", command: "crawl4ai-mcp" },
-  searxng: { transport: "stdio", command: "searxng-mcp" },
-  "computer-use-linux": { transport: "stdio", command: "computer-use-mcp" },
-};
-
 export type BackendTransport = (
   tool: BackendToolDef,
   args: Record<string, unknown>,
 ) => Promise<unknown> | unknown;
+
+/** Lists a backend's live tools (MCP tools/list) for catalog discovery. */
+export type BackendDiscovery = () => Promise<McpToolDescriptor[]>;
 
 export class UnknownToolError extends Error {
   readonly code = "UNKNOWN_TOOL";
@@ -122,6 +111,7 @@ interface BreakerState {
 
 let defaultCatalog: ToolCatalog | undefined;
 const transports = new Map<string, BackendTransport>();
+const discoveries = new Map<string, BackendDiscovery>();
 const breakers = new Map<string, BreakerState>();
 
 /** Singleton default catalog seeded with all backend tools. */
@@ -316,9 +306,109 @@ export function resetCircuitBreaker(toolName?: string): void {
   breakers.delete(toolName);
 }
 
-/** Test hook: clears all registered backend transports. */
+/** Test hook: clears all registered backend transports and discoveries. */
 export function clearBackendTransports(): void {
   transports.clear();
+  discoveries.clear();
+}
+
+/** Registers the tools/list source used to discover a backend's tools. */
+export function registerBackendDiscovery(server: string, discovery: BackendDiscovery): void {
+  endpointFor(server);
+  if (typeof discovery !== "function") {
+    throw new ValidationError("registerBackendDiscovery: discovery must be a function.");
+  }
+  discoveries.set(server, discovery);
+}
+
+/** Test hook: replaces the default catalog with a fresh offline seed catalog. */
+export function resetDefaultCatalog(): void {
+  defaultCatalog = createDefaultCatalog();
+}
+
+function oneLine(text: string): string {
+  return text.split(/\r?\n/).map((l) => l.trim()).find((l) => l.length > 0) ?? "";
+}
+
+/**
+ * Converts a backend tools/list entry into a catalog definition. The tool
+ * counts as mutating unless the backend annotates it `readOnlyHint: true`
+ * (fail-closed: read-only roles may only call tools declared read-only).
+ */
+export function toolDefFromDescriptor(server: string, descriptor: McpToolDescriptor): BackendToolDef {
+  const endpoint = endpointFor(server);
+  if (typeof descriptor.name !== "string" || descriptor.name.length === 0) {
+    throw new ValidationError(`Backend "${server}" listed a tool without a name.`);
+  }
+  const title = descriptor.title ?? descriptor.annotations?.title ?? "";
+  const description =
+    oneLine(descriptor.description ?? "") || oneLine(title) || `${descriptor.name} (${server})`;
+  const schema = descriptor.inputSchema ?? { type: "object", properties: {} };
+  if (!isPlainRecord(schema)) {
+    throw new ValidationError(`Backend "${server}" tool "${descriptor.name}" has a non-object inputSchema.`);
+  }
+  const keywords = new Set<string>([endpoint.target, ...server.split(/[^a-zA-Z0-9]+/).filter((k) => k.length > 0)]);
+  for (const word of title.split(/[^a-zA-Z0-9]+/)) {
+    if (word.length > 0) {
+      keywords.add(word.toLowerCase());
+    }
+  }
+  return {
+    server,
+    profile: endpoint.profile,
+    name: catalogToolName(server, descriptor.name),
+    description,
+    boostKeywords: [...keywords],
+    inputSchemaJson: JSON.stringify(schema),
+    mutating: descriptor.annotations?.readOnlyHint !== true,
+    remoteName: descriptor.name,
+    source: "discovered",
+  };
+}
+
+export interface DiscoveryReport {
+  server: string;
+  ok: boolean;
+  toolCount: number;
+  error?: string;
+}
+
+export interface RefreshCatalogOptions {
+  catalog?: ToolCatalog;
+  /** Restrict discovery to these backend servers (default: all registered). */
+  servers?: string[];
+}
+
+/**
+ * Discovers live tools from every registered backend and upserts them into
+ * the catalog. A backend whose discovery succeeds has its seed (or older
+ * discovered) entries replaced wholesale; a backend that fails keeps its
+ * current entries so search keeps working offline.
+ */
+export async function refreshCatalog(options: RefreshCatalogOptions = {}): Promise<DiscoveryReport[]> {
+  const catalog = options.catalog ?? getDefaultCatalog();
+  const servers = options.servers ?? [...discoveries.keys()];
+  return Promise.all(
+    servers.map(async (server): Promise<DiscoveryReport> => {
+      const discovery = discoveries.get(server);
+      if (discovery === undefined) {
+        return { server, ok: false, toolCount: 0, error: "no discovery registered" };
+      }
+      try {
+        const descriptors = await discovery();
+        const definitions = descriptors.map((d) => toolDefFromDescriptor(server, d));
+        catalog.replaceServerTools(server, definitions);
+        return { server, ok: true, toolCount: definitions.length };
+      } catch (error) {
+        return {
+          server,
+          ok: false,
+          toolCount: catalog.toolsForServer(server).length,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }),
+  );
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -419,7 +509,7 @@ export async function callTool(input: CallToolInput, options: CallToolOptions = 
   const definition = catalog.getTool(input.toolName);
   checkSchemaArgs(parseInputSchema(definition), input.args, input.toolName);
 
-  const endpoint = ROUTING_TABLE[definition.server];
+  const endpoint: BackendEndpoint | undefined = ROUTING_TABLE[definition.server];
   if (endpoint === undefined) {
     recordFailure(input.toolName, nowMs);
     throw new BackendUnreachableError(
@@ -430,7 +520,7 @@ export async function callTool(input: CallToolInput, options: CallToolOptions = 
   if (transport === undefined) {
     recordFailure(input.toolName, nowMs);
     throw new BackendUnreachableError(
-      `Backend "${definition.server}" unreachable via ${endpoint.transport}:${endpoint.command} (no live transport registered for tool "${input.toolName}").`,
+      `Backend "${definition.server}" (gateway target "${endpoint.target}") unreachable: no live transport registered for tool "${input.toolName}".`,
     );
   }
   let result: unknown;
@@ -451,4 +541,15 @@ export async function callTool(input: CallToolInput, options: CallToolOptions = 
     profile: definition.profile,
     result,
   };
+}
+
+if (import.meta.main) {
+  const { runStdioServer } = await import("./mcp-server.ts");
+  try {
+    await runStdioServer();
+    process.exit(0);
+  } catch (error) {
+    process.stderr.write(`[heretek-lazy-broker] fatal: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.exit(1);
+  }
 }
