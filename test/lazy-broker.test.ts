@@ -108,20 +108,20 @@ describe("BM25 search accuracy and latency", () => {
   test("android query ranks an adb tool first", () => {
     const hits = searchTools({ query: "android adb install apk device" });
     expect(hits.length).toBeGreaterThan(0);
-    expect(hits[0]?.name.startsWith("adb__")).toBe(true);
+    expect(hits[0]?.name.startsWith("adb_")).toBe(true);
     expect(hits[0]?.profile).toBe("android");
   });
 
   test("ghidra decompile query ranks the ghidra decompiler first", () => {
     const hits = searchTools({ query: "ghidra decompile function pseudocode" });
     expect(hits.length).toBeGreaterThan(0);
-    expect(hits[0]?.name).toBe("ghidra__decompile_function");
+    expect(hits[0]?.name).toBe("ghidra_decompile_function");
   });
 
   test("godot scene query ranks the godot scene inspector first", () => {
     const hits = searchTools({ query: "godot scene tree nodes" });
     expect(hits.length).toBeGreaterThan(0);
-    expect(hits[0]?.name).toBe("godot__scene_tree");
+    expect(hits[0]?.name).toBe("godot_scene_tree");
   });
 
   test("profile filter restricts results to that profile", () => {
@@ -130,7 +130,7 @@ describe("BM25 search accuracy and latency", () => {
     for (const hit of hits) {
       expect(hit.profile).toBe("game");
     }
-    expect(hits[0]?.name).toBe("blender__render");
+    expect(hits[0]?.name).toBe("blender_render");
   });
 
   test("results carry name/profile/summary but never full schemas", () => {
@@ -164,7 +164,7 @@ describe("BM25 search accuracy and latency", () => {
 
 describe("inspect schema path", () => {
   test("returns the full input schema for a single tool", () => {
-    const schema = inspectToolSchema("adb__install");
+    const schema = inspectToolSchema("adb_install");
     expect(schema["type"]).toBe("object");
     const properties = schema["properties"] as Record<string, unknown>;
     expect(Object.keys(properties).sort()).toEqual(["apk", "serial"]);
@@ -179,30 +179,30 @@ describe("inspect schema path", () => {
 
 describe("authorization gate", () => {
   test("mutating flags are set: writes/installs mutate, reads do not", () => {
-    expect(isMutatingTool("core__fs_write")).toBe(true);
-    expect(isMutatingTool("adb__install")).toBe(true);
-    expect(isMutatingTool("maestro__test")).toBe(true);
-    expect(isMutatingTool("core__fs_read")).toBe(false);
-    expect(isMutatingTool("ghidra__decompile_function")).toBe(false);
-    expect(isMutatingTool("searxng__web_search")).toBe(false);
+    expect(isMutatingTool("core_fs_write")).toBe(true);
+    expect(isMutatingTool("adb_install")).toBe(true);
+    expect(isMutatingTool("maestro_test")).toBe(true);
+    expect(isMutatingTool("core_fs_read")).toBe(false);
+    expect(isMutatingTool("ghidra_decompile_function")).toBe(false);
+    expect(isMutatingTool("searxng_web_search")).toBe(false);
   });
 
   test("qa-adversary and director cannot call mutating tools", () => {
-    expect(() => authorizeCall("qa-adversary", "core__fs_write")).toThrow(AuthorizationError);
-    expect(() => authorizeCall("director", "adb__install")).toThrow(AuthorizationError);
+    expect(() => authorizeCall("qa-adversary", "core_fs_write")).toThrow(AuthorizationError);
+    expect(() => authorizeCall("director", "adb_install")).toThrow(AuthorizationError);
   });
 
   test("qa-adversary and director may call read-only tools", () => {
-    expect(() => authorizeCall("qa-adversary", "core__fs_read")).not.toThrow();
-    expect(() => authorizeCall("director", "ghidra__decompile_function")).not.toThrow();
+    expect(() => authorizeCall("qa-adversary", "core_fs_read")).not.toThrow();
+    expect(() => authorizeCall("director", "ghidra_decompile_function")).not.toThrow();
   });
 
   test("staff-backend may call mutating tools", () => {
-    expect(() => authorizeCall("staff-backend", "core__fs_write")).not.toThrow();
+    expect(() => authorizeCall("staff-backend", "core_fs_write")).not.toThrow();
   });
 
   test("unknown roles and tools fail closed", () => {
-    expect(() => authorizeCall("intruder" as never, "core__fs_read")).toThrow(ValidationError);
+    expect(() => authorizeCall("intruder" as never, "core_fs_read")).toThrow(ValidationError);
     expect(() => authorizeCall("staff-backend", "nope__missing")).toThrow(UnknownToolError);
   });
 });
@@ -217,14 +217,14 @@ describe("call routing, breaker, and fail-closed backends", () => {
         echoedArgs: args,
       }));
       const out = await callTool(
-        { toolName: "core__fs_read", args: { path: "roles/director.md" } },
+        { toolName: "core_fs_read", args: { path: "roles/director.md" } },
         { role: "staff-backend" },
       );
       expect(out.ok).toBe(true);
       expect(out.server).toBe("heretek-core");
       expect(out.profile).toBe("core");
       expect(out.result).toEqual({
-        echoedTool: "core__fs_read",
+        echoedTool: "core_fs_read",
         echoedArgs: { path: "roles/director.md" },
       });
     } finally {
@@ -235,38 +235,38 @@ describe("call routing, breaker, and fail-closed backends", () => {
 
   test("unreachable backend fails closed without a registered transport", async () => {
     clearBackendTransports();
-    resetCircuitBreaker("searxng__web_search");
+    resetCircuitBreaker("searxng_web_search");
     try {
       const promise = callTool(
-        { toolName: "searxng__web_search", args: { query: "bm25" } },
+        { toolName: "searxng_web_search", args: { query: "bm25" } },
         { role: "staff-backend" },
       );
       await expect(promise).rejects.toThrow(BackendUnreachableError);
     } finally {
-      resetCircuitBreaker("searxng__web_search");
+      resetCircuitBreaker("searxng_web_search");
     }
   });
 
   test("argument validation fails closed on missing and mistyped fields", async () => {
     clearBackendTransports();
-    resetCircuitBreaker("core__fs_read");
+    resetCircuitBreaker("core_fs_read");
     try {
       registerBackendTransport("heretek-core", () => "unreachable");
       await expect(
-        callTool({ toolName: "core__fs_read", args: {} }, { role: "staff-backend" }),
+        callTool({ toolName: "core_fs_read", args: {} }, { role: "staff-backend" }),
       ).rejects.toThrow(ValidationError);
       await expect(
-        callTool({ toolName: "core__fs_read", args: { path: 42 } }, { role: "staff-backend" }),
+        callTool({ toolName: "core_fs_read", args: { path: 42 } }, { role: "staff-backend" }),
       ).rejects.toThrow(ValidationError);
     } finally {
       clearBackendTransports();
-      resetCircuitBreaker("core__fs_read");
+      resetCircuitBreaker("core_fs_read");
     }
   });
 
   test("denied roles fail closed before any backend contact", async () => {
     clearBackendTransports();
-    resetCircuitBreaker("core__fs_write");
+    resetCircuitBreaker("core_fs_write");
     try {
       let contacted = false;
       registerBackendTransport("heretek-core", () => {
@@ -275,60 +275,60 @@ describe("call routing, breaker, and fail-closed backends", () => {
       });
       await expect(
         callTool(
-          { toolName: "core__fs_write", args: { path: "x", contents: "y" } },
+          { toolName: "core_fs_write", args: { path: "x", contents: "y" } },
           { role: "qa-adversary" },
         ),
       ).rejects.toThrow(AuthorizationError);
       expect(contacted).toBe(false);
     } finally {
       clearBackendTransports();
-      resetCircuitBreaker("core__fs_write");
+      resetCircuitBreaker("core_fs_write");
     }
   });
 
   test("circuit opens for 60s after 3 consecutive backend failures", async () => {
     clearBackendTransports();
-    resetCircuitBreaker("blender__render");
+    resetCircuitBreaker("blender_render");
     try {
       registerBackendTransport("blender-mcp", () => {
         throw new Error("boom");
       });
       const args = { blend: "scene.blend", frame: 1 };
-      await expect(callTool({ toolName: "blender__render", args }, { role: "staff-backend", nowMs: 1_000 })).rejects.toThrow(
+      await expect(callTool({ toolName: "blender_render", args }, { role: "staff-backend", nowMs: 1_000 })).rejects.toThrow(
         BackendUnreachableError,
       );
-      await expect(callTool({ toolName: "blender__render", args }, { role: "staff-backend", nowMs: 2_000 })).rejects.toThrow(
+      await expect(callTool({ toolName: "blender_render", args }, { role: "staff-backend", nowMs: 2_000 })).rejects.toThrow(
         BackendUnreachableError,
       );
-      await expect(callTool({ toolName: "blender__render", args }, { role: "staff-backend", nowMs: 3_000 })).rejects.toThrow(
+      await expect(callTool({ toolName: "blender_render", args }, { role: "staff-backend", nowMs: 3_000 })).rejects.toThrow(
         BackendUnreachableError,
       );
-      await expect(callTool({ toolName: "blender__render", args }, { role: "staff-backend", nowMs: 4_000 })).rejects.toThrow(
+      await expect(callTool({ toolName: "blender_render", args }, { role: "staff-backend", nowMs: 4_000 })).rejects.toThrow(
         CircuitOpenError,
       );
       // Still open just before the 60s window elapses, closed right after.
       await expect(
         callTool(
-          { toolName: "blender__render", args },
+          { toolName: "blender_render", args },
           { role: "staff-backend", nowMs: 3_000 + CIRCUIT_OPEN_MS - 1 },
         ),
       ).rejects.toThrow(CircuitOpenError);
       expect(CIRCUIT_OPEN_MS).toBe(60_000);
       await expect(
         callTool(
-          { toolName: "blender__render", args },
+          { toolName: "blender_render", args },
           { role: "staff-backend", nowMs: 3_000 + CIRCUIT_OPEN_MS + 1 },
         ),
       ).rejects.toThrow(BackendUnreachableError);
     } finally {
       clearBackendTransports();
-      resetCircuitBreaker("blender__render");
+      resetCircuitBreaker("blender_render");
     }
   });
 
   test("successful call resets the consecutive-failure count", async () => {
     clearBackendTransports();
-    resetCircuitBreaker("core__git_status");
+    resetCircuitBreaker("core_git_status");
     try {
       const script: Array<"fail" | "ok"> = ["fail", "fail", "ok", "fail", "fail", "ok"];
       registerBackendTransport("heretek-core", () => {
@@ -338,7 +338,7 @@ describe("call routing, breaker, and fail-closed backends", () => {
         }
         return { clean: true };
       });
-      const input = { toolName: "core__git_status", args: {} };
+      const input = { toolName: "core_git_status", args: {} };
       await expect(callTool(input, { role: "staff-backend", nowMs: 100 })).rejects.toThrow(
         BackendUnreachableError,
       );
@@ -356,11 +356,11 @@ describe("call routing, breaker, and fail-closed backends", () => {
         BackendUnreachableError,
       );
       const recovered = await callTool(input, { role: "staff-backend", nowMs: 600 });
-      expect(recovered).toMatchObject({ ok: true, toolName: "core__git_status" });
+      expect(recovered).toMatchObject({ ok: true, toolName: "core_git_status" });
       expect(script).toEqual([]);
     } finally {
       clearBackendTransports();
-      resetCircuitBreaker("core__git_status");
+      resetCircuitBreaker("core_git_status");
     }
   });
 
@@ -369,7 +369,7 @@ describe("call routing, breaker, and fail-closed backends", () => {
       callTool({ toolName: "nope__missing", args: {} }, { role: "staff-backend" }),
     ).rejects.toThrow(UnknownToolError);
     await expect(
-      callTool({ toolName: "core__fs_read", args: { path: "x" } }, { role: "intruder" }),
+      callTool({ toolName: "core_fs_read", args: { path: "x" } }, { role: "intruder" }),
     ).rejects.toThrow(ValidationError);
   });
 });

@@ -41,17 +41,17 @@ echo "=== wave-2 accept: BM25 ranking spot check ==="
 bun -e '
 import { searchTools } from "./src/lazy-broker/meta-router-mcp.ts";
 const android = searchTools({ query: "android adb install apk device" });
-if (!android[0]?.name.startsWith("adb__")) {
+if (!android[0]?.name.startsWith("adb_")) {
   console.error(`FAIL: android query top hit was ${android[0]?.name}`);
   process.exit(1);
 }
 const ghidra = searchTools({ query: "ghidra decompile function pseudocode" });
-if (ghidra[0]?.name !== "ghidra__decompile_function") {
+if (ghidra[0]?.name !== "ghidra_decompile_function") {
   console.error(`FAIL: ghidra query top hit was ${ghidra[0]?.name}`);
   process.exit(1);
 }
 const godot = searchTools({ query: "godot scene tree nodes" });
-if (godot[0]?.name !== "godot__scene_tree") {
+if (godot[0]?.name !== "godot_scene_tree") {
   console.error(`FAIL: godot query top hit was ${godot[0]?.name}`);
   process.exit(1);
 }

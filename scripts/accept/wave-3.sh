@@ -73,39 +73,52 @@ try {
 
 echo "=== wave-3 accept: production configs ==="
 bun -e '
-import { readFileSync, existsSync } from "node:fs";
-if (!existsSync("configs/opencode.base.json")) {
-  console.error("FAIL: configs/opencode.base.json missing");
-  process.exit(1);
-}
+import { readFileSync, existsSync, statSync } from "node:fs";
+const fail = (msg) => { console.error(`FAIL: ${msg}`); process.exit(1); };
+if (!existsSync("configs/opencode.base.json")) fail("configs/opencode.base.json missing");
 const base = JSON.parse(readFileSync("configs/opencode.base.json", "utf8"));
-const mcpNames = Object.keys(base.mcp ?? {});
-if (mcpNames.length !== 2 || !mcpNames.includes("heretek-lazy-broker") || !mcpNames.includes("context-mode")) {
-  console.error(`FAIL: opencode.base.json must load ONLY heretek-lazy-broker + context-mode, got: ${mcpNames.join(", ")}`);
+// OpenCode v2 native shape: mcp.servers.<name> = { type: "local", command: [...] }
+const servers = base.mcp?.servers ?? {};
+const names = Object.keys(servers);
+if (names.length !== 1 || names[0] !== "heretek-lazy-broker") {
+  fail(`opencode.base.json must load ONLY heretek-lazy-broker under mcp.servers, got: ${names.join(", ") || "(none)"}`);
+}
+const broker = servers["heretek-lazy-broker"];
+if (broker.type !== "local" || !Array.isArray(broker.command) || broker.command.length === 0) {
+  fail("heretek-lazy-broker must be a local MCP server with a command array");
+}
+const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+const binPath = pkg.bin?.[broker.command[0]];
+if (typeof binPath !== "string") fail(`command "${broker.command[0]}" is not a package.json bin entry`);
+if (!readFileSync(binPath, "utf8").startsWith("#!/usr/bin/env bun\n")) fail(`${binPath} lacks a bun shebang`);
+if ((statSync(binPath).mode & 0o111) === 0) fail(`${binPath} is not executable`);
+if (JSON.stringify(base).includes("context-mode")) fail("context-mode is a library, not an MCP server; it must not be registered");
+if (!(base.plugins ?? []).includes("@heretek-ai/opencode-harness")) fail("plugins must include @heretek-ai/opencode-harness");
+if (base.tokenBudget?.maxUpfrontSchemaTokens !== 500) fail("tokenBudget.maxUpfrontSchemaTokens must be 500");
+if (existsSync("configs/agentgateway.yaml")) {
+  fail("configs/agentgateway.yaml must not exist: heretek-devcontainers compose/agentgateway.yaml is canonical");
+}
+console.log(`PASS: opencode.base.json loads only heretek-lazy-broker via bin ${binPath}; no duplicate gateway config`);
+'
+
+echo "=== wave-3 accept: broker bin serves MCP over stdio ==="
+bun -e '
+const pkg = JSON.parse(await Bun.file("package.json").text());
+const bin = pkg.bin["heretek-lazy-broker"];
+const proc = Bun.spawn([`./${bin}`], { stdin: "pipe", stdout: "pipe", stderr: "inherit", env: { ...process.env, HERETEK_BROKER_OFFLINE: "1" } });
+proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "accept", version: "1" } } }) + "\n");
+proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
+proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" }) + "\n");
+proc.stdin.end();
+const lines = (await new Response(proc.stdout).text()).trim().split("\n").map((l) => JSON.parse(l));
+const code = await proc.exited;
+const byId = new Map(lines.map((m) => [m.id, m]));
+const tools = byId.get(2)?.result?.tools?.map((t) => t.name) ?? [];
+if (code !== 0 || byId.get(1)?.result?.protocolVersion !== "2025-06-18" || tools.length !== 3 || lines.length !== 2) {
+  console.error(`FAIL: broker stdio handshake (exit ${code}): ${JSON.stringify(lines)}`);
   process.exit(1);
 }
-if (base.tokenBudget?.maxUpfrontSchemaTokens !== 500) {
-  console.error("FAIL: tokenBudget.maxUpfrontSchemaTokens must be 500");
-  process.exit(1);
-}
-for (const dep of ["@heretek-ai/opencode-harness", "heretek-lazy-broker", "n2-qln", "context-mode"]) {
-  if (!JSON.stringify(base).includes(dep)) {
-    console.error(`FAIL: opencode.base.json must wire ${dep}`);
-    process.exit(1);
-  }
-}
-if (!existsSync("configs/agentgateway.yaml")) {
-  console.error("FAIL: configs/agentgateway.yaml missing");
-  process.exit(1);
-}
-const gw = readFileSync("configs/agentgateway.yaml", "utf8");
-for (const needle of ["port: 3000", "cel:", "qa-adversary", "director"]) {
-  if (!gw.includes(needle)) {
-    console.error(`FAIL: agentgateway.yaml missing required fragment: ${needle}`);
-    process.exit(1);
-  }
-}
-console.log("PASS: opencode.base.json (lazy router + context-mode only, <500 tokens) and agentgateway.yaml (CEL, :3000)");
+console.log(`PASS: ${bin} answered initialize + tools/list over stdio (${tools.join(", ")}) and exited 0`);
 '
 
 echo "=== wave-3 accept: gitignore evidence hygiene ==="
