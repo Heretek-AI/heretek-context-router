@@ -82,12 +82,19 @@ export function remoteToolName(server: string, catalogName: string): string {
   return catalogName.slice(prefix.length);
 }
 
+/** Drops trailing slashes without a regex, so a hostile URL stays linear. */
+function stripTrailingSlashes(url: string): string {
+  let end = url.length;
+  while (end > 0 && url[end - 1] === "/") end--;
+  return url.slice(0, end);
+}
+
 /** Per-target MCP endpoint on the gateway: `${gateway}/mcp/<target>`. */
 export function targetUrl(gatewayUrl: string, server: string): string {
-  return `${gatewayUrl.replace(/\/+$/, "")}/mcp/${endpointFor(server).target}`;
+  return `${stripTrailingSlashes(gatewayUrl)}/mcp/${endpointFor(server).target}`;
 }
 
 /** Multiplexed MCP endpoint on the gateway (all targets, prefixed names). */
 export function multiplexedUrl(gatewayUrl: string): string {
-  return `${gatewayUrl.replace(/\/+$/, "")}/mcp`;
+  return `${stripTrailingSlashes(gatewayUrl)}/mcp`;
 }
