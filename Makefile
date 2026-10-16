@@ -6,7 +6,7 @@ check:
 	bun test
 
 accept:
-	bash scripts/accept/wave-*.sh
+	bash scripts/accept/run-all.sh
 
 install:
 	bun install
