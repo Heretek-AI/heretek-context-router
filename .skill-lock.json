@@ -1,0 +1,20 @@
+{
+  "version": 3,
+  "tool": "heretek-context-router",
+  "skills": [
+    {
+      "name": "lazy-search",
+      "skillDir": "skills/lazy-search",
+      "skillFolderHash": "93afc76317bd961f318d059972da2f04b2532835375e4cb935a50860e3f975a6",
+      "version": "1.0.0",
+      "source": "workspace"
+    },
+    {
+      "name": "red-proof",
+      "skillDir": "skills/red-proof",
+      "skillFolderHash": "02108e2af8ef271efafdf1c5f9814238b9aaf78e8b3311211730cc88ac8aa5b1",
+      "version": "1.0.0",
+      "source": "workspace"
+    }
+  ]
+}

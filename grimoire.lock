@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "tool": "heretek-context-router",
+  "format": "RFC8785-JCS-SHA256",
+  "declarations": {
+    "metaTools": [
+      "mcp_call_tool",
+      "mcp_inspect_schema",
+      "mcp_search_tools"
+    ],
+    "profiles": [
+      "android",
+      "appsec",
+      "core",
+      "game",
+      "research"
+    ],
+    "router": "heretek-context-router@0.1.0",
+    "skillLockVersion": 3,
+    "skills": [
+      "lazy-search",
+      "red-proof"
+    ]
+  },
+  "declaration_hash": "4204cf0a6166b6902f229910e6c5a6276aa1f6599c51d07d6bf5535c540679a5"
+}

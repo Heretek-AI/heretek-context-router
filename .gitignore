@@ -4,4 +4,5 @@ coverage/
 .bun-cache/
 worktrees/
 *.log
+!docs/evidence/**/red-proofs.log
 .DS_Store
