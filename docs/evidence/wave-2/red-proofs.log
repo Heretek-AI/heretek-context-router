@@ -1,0 +1,181 @@
+# Wave 2 QA Red-Proof Evidence Log (`agency-qa`)
+- Worktree: `worktrees/wave-2`, branch `wave-2-lazy-broker`
+- Date (UTC): 2026-10-16
+- Verifier role: QA (evaluator only; no commits, no subagents)
+
+## 0. Baseline `git status` (before any QA step)
+```text
+$ git status --short && git branch --show-current && pwd
+wave-2-lazy-broker
+/home/john/Projects/Heretek-AI-Rebuild/heretek-context-router/worktrees/wave-2
+```
+(clean: no uncommitted modifications; branch `wave-2-lazy-broker`)
+
+## 1a. `make check` — EXIT 0
+```text
+$ make check
+bun install
+bun install v1.4.2 (744846f84)
+
++ @types/bun@1.4.3
++ typescript@5.9.3
++ zod@3.25.76
+
+7 packages installed [38.00ms]
+bun run check
+$ tsc --noEmit
+bun test
+bun test v1.4.2 (744846f84)
+
+ 60 pass
+ 0 fail
+ 767 expect() calls
+Ran 60 tests across 3 files. [53.00ms]
+EXIT_CODE=0
+```
+Result: PASS (install + `tsc --noEmit` + full suite green).
+
+## 1b. Accept scripts — both EXIT 0
+### `bash scripts/accept/wave-2.sh` — EXIT 0
+```text
+=== wave-2 accept: typecheck ===
+$ tsc --noEmit
+=== wave-2 accept: test suite ===
+bun test v1.4.2 (744846f84)
+
+ 60 pass
+ 0 fail
+ 767 expect() calls
+Ran 60 tests across 3 files. [45.00ms]
+=== wave-2 accept: token budget + tool count + catalog size ===
+PASS: 3 meta-tools, ~240 estimated tokens (<500), 34 indexed tools across 5 profiles
+=== wave-2 accept: BM25 ranking spot check ===
+PASS: BM25 top-1 correct for android (adb__install), ghidra (ghidra__decompile_function), godot (godot__scene_tree)
+=== wave-2 accept: ALL CHECKS PASSED ===
+EXIT_CODE=0
+```
+Result: PASS — exactly 3 meta-tools, ~240 estimated tokens (<500 hard budget and <400 target), 34 tools / 5 profiles, BM25 top-1 correct on all three probes.
+
+### `bash scripts/accept/wave-1.sh` (regression) — EXIT 0
+```text
+=== wave-1 accept: typecheck ===
+$ tsc --noEmit
+=== wave-1 accept: test suite ===
+bun test v1.4.2 (744846f84)
+
+ 60 pass
+ 0 fail
+ 767 expect() calls
+Ran 60 tests across 3 files. [53.00ms]
+=== wave-1 accept: prefix equality spot check (director vs qa-adversary) ===
+PASS: frozen prefix identical for director and qa-adversary (8268 bytes, breakpoints [1089,8268])
+=== wave-1 accept: ALL CHECKS PASSED ===
+EXIT_CODE=0
+```
+Result: PASS — Wave 1 prefix-equality contract intact (no `roles/` drift).
+
+## 1c. Red-Proof Sabotage (MANDATORY, Wave 2 core invariant)
+Asserted condition: `listMetaTools()` in `src/lazy-broker/meta-router-mcp.ts`
+returns EXACTLY 3 meta-tools (`mcp_search_tools`, `mcp_inspect_schema`,
+`mcp_call_tool`); `test/lazy-broker.test.ts` asserts the exact name list.
+
+Sabotage applied (temporary, evaluator-only): appended a 4th entry
+(duplicate `mcp_search_tools` with "SABOTAGE: illicit 4th meta-tool" description)
+to the array returned by `listMetaTools()`.
+
+### Sabotage run: `bun test test/lazy-broker.test.ts` — EXIT 1 (FAIL, as required)
+```text
+bun test v1.4.2 (744846f84)
+
+test/lazy-broker.test.ts:
+28 | } from "../src/lazy-broker/meta-router-mcp.ts";
+29 |
+30 | describe("tools/list surface: exactly 3 meta-tools under the token budget", () => {
+31 |   test("exposes exactly mcp_search_tools, mcp_inspect_schema, mcp_call_tool", () => {
+32 |     const tools = listMetaTools();
+33 |     expect(tools.map((t) => t.name)).toEqual([
+                                          ^
+error: expect(received).toEqual(expected)
+
+@@ -4,2 +4,3 @@
+    "mcp_call_tool",
++   "mcp_search_tools",
+  ]
+
+- Expected  - 0
++ Received  + 1
+
+      at <anonymous> (.../worktrees/wave-2/test/lazy-broker.test.ts:33:38)
+(fail) tools/list surface: exactly 3 meta-tools under the token budget > exposes exactly mcp_search_tools, mcp_inspect_schema, mcp_call_tool [1.26ms]
+
+ 28 pass
+ 1 fail
+ 137 expect() calls
+Ran 29 tests across 1 file. [31.00ms]
+EXIT_CODE=1
+```
+Result: RED PROOF CONFIRMED — the check is non-vacuous; a 4th tool in
+`tools/list` fails the suite immediately (exit >= 1). No vacuous pass.
+
+### Restore + post-restore green
+```text
+$ git status --short
+M src/lazy-broker/meta-router-mcp.ts
+$ git checkout -- src/lazy-broker/meta-router-mcp.ts
+--- after restore ---
+$ git status --short
+RESTORE_CLEAN
+```
+(only the sabotaged production file was touched; restored via `git checkout`;
+status fully clean afterward.)
+
+```text
+$ bun test test/lazy-broker.test.ts
+bun test v1.4.2 (744846f84)
+
+ 29 pass
+ 0 fail
+ 137 expect() calls
+Ran 29 tests across 1 file. [19.00ms]
+EXIT_CODE=0
+$ bun run check
+$ tsc --noEmit
+CHECK_EXIT=0
+```
+Result: PASS — 29/29 lazy-broker tests green, `tsc --noEmit` clean after restore.
+
+## 1d. Zero-stubs scan + full suite (post-restore)
+```text
+$ grep -rEn "TODO|FIXME|XXX|HACK|implement later|not implemented|echo \"passed\"|\|\| true|set \+e" src roles test scripts
+ZEROSTUB_EXIT=1
+```
+(exit 1 = zero matches; `configs/` does not exist yet in Wave 2 — it is Wave 3
+scope per SPEC §2.3 — so it was excluded from the path list rather than faked.)
+
+```text
+$ grep -rEn "return true;" src test
+DUMMY_EXIT=1
+```
+(exit 1 = no `return true;` dummy passes in `src`/`test`.)
+
+```text
+$ bun test
+bun test v1.4.2 (744846f84)
+
+ 60 pass
+ 0 fail
+ 767 expect() calls
+Ran 60 tests across 3 files. [56.00ms]
+BUNTEST_EXIT=0
+```
+Result: PASS — full suite 60 pass / 0 fail / 767 assertions.
+
+## QA Gate Summary
+- 1a `make check`: EXIT 0 — PASS
+- 1b `scripts/accept/wave-2.sh`: EXIT 0 — PASS (~240 tokens, 3 tools, 34 indexed)
+- 1b regression `scripts/accept/wave-1.sh`: EXIT 0 — PASS
+- 1c sabotage (4th tool): FAIL exit 1 while sabotaged (non-vacuous) — PASS
+- 1c restore: `git checkout -- src/lazy-broker/meta-router-mcp.ts`, status clean — PASS
+- Post-restore `bun test` + `bun run check`: EXIT 0 — PASS
+- Zero-stubs grep: zero matches — PASS
+- QA verdict: Wave 2 QA GATE PASS. Evidence file left uncommitted for coordinator.
